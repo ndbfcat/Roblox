@@ -1,216 +1,251 @@
---// Services
+-- SERVICES
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
---// Player
+-- PLAYER
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local hrp = character:WaitForChild("HumanoidRootPart")
 
---// Settings
-local savedSettings = { AutoStore = false, Noclip = true }
-local storedFruits = {}
+-- SETTINGS
+local settings = { AutoStore = true, Noclip = true }
 
---// Fruit list
+-- FRUITS
 local fruitsList = {
-	"Fruit ","Rocket Fruit","Spin Fruit","Ghost Fruit","Spring Fruit","Bomb Fruit","Spike Fruit",
-	"Smoke Fruit","Blade Fruit","Sand Fruit","Ice Fruit","Dark Fruit","Diamond Fruit","Light Fruit",
-	"Rubber Fruit","Barrier Fruit","Magma Fruit","Phoenix Fruit","Love Fruit","Spider Fruit",
-	"Sound Fruit","Buddha Fruit","Quake Fruit","Gravity Fruit","Control Fruit","T-Rex Fruit",
-	"Mammoth Fruit","Spirit Fruit","Venom Fruit","Shadow Fruit","Rumble Fruit","Portal Fruit",
-	"Blizzard Fruit","Dragon Fruit","Leopard Fruit","Dough Fruit","Dragon (West) Fruit",
-	"Dragon (East) Fruit","Kitsune Fruit","Gas Fruit","Flame Fruit","Yeti Fruit",
-	"Creation Fruit","Eagle Fruit"
+	"Fruit ","Rocket Fruit","Spin Fruit","Ghost Fruit","Spring Fruit","Bomb Fruit",
+	"Spike Fruit","Smoke Fruit","Blade Fruit","Sand Fruit","Ice Fruit","Dark Fruit",
+	"Diamond Fruit","Light Fruit","Rubber Fruit","Barrier Fruit","Magma Fruit",
+	"Phoenix Fruit","Love Fruit","Spider Fruit","Sound Fruit","Buddha Fruit",
+	"Quake Fruit","Gravity Fruit","Control Fruit","T-Rex Fruit","Mammoth Fruit",
+	"Spirit Fruit","Venom Fruit","Shadow Fruit","Rumble Fruit","Portal Fruit",
+	"Blizzard Fruit","Dragon Fruit","Leopard Fruit","Dough Fruit",
+	"Dragon (West) Fruit","Dragon (East) Fruit","Kitsune Fruit",
+	"Gas Fruit","Flame Fruit","Yeti Fruit","Creation Fruit","Eagle Fruit"
 }
 
---// Find fruits
+-- FIND FRUITS
 local function findFruits()
-	local found = {}
+	local t = {}
 	for _, v in ipairs(Workspace:GetChildren()) do
 		if table.find(fruitsList, v.Name) and v:FindFirstChild("Handle") then
-			table.insert(found, v)
+			table.insert(t, v)
 		end
 	end
-	return found
+	return t
 end
 
---// Smooth teleport
-local activeTween
-local function teleportTo(fruit)
-	if not fruit or not fruit:FindFirstChild("Handle") then return end
-	if activeTween then activeTween:Cancel() end
+---------------------------------------------------
+-- MOVEMENT (SMOOTH FLY)
+---------------------------------------------------
+local moving = false
+local noclipConn
 
-	local dist = (humanoidRootPart.Position - fruit.Handle.Position).Magnitude
-	local time = math.clamp(dist / 150, 1, 4)
-
-	activeTween = TweenService:Create(
-		humanoidRootPart,
-		TweenInfo.new(time, Enum.EasingStyle.Linear),
-		{CFrame = CFrame.new(fruit.Handle.Position + Vector3.new(0,3,0))}
-	)
-
-	if savedSettings.Noclip then
-		RunService.Stepped:Once(function()
+local function setNoclip(state)
+	if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+	if state then
+		noclipConn = RunService.Stepped:Connect(function()
 			for _, p in ipairs(character:GetDescendants()) do
 				if p:IsA("BasePart") then p.CanCollide = false end
 			end
 		end)
 	end
-
-	activeTween:Play()
 end
 
---// AutoStore
+local function flyTo(position, speed)
+	moving = true
+	if settings.Noclip then setNoclip(true) end
+
+	local connection
+	connection = RunService.Stepped:Connect(function(_, dt)
+		local currentPos = hrp.Position
+		local direction = (position - currentPos)
+		local dist = direction.Magnitude
+		if dist < 1 then
+			connection:Disconnect()
+			moving = false
+			setNoclip(false)
+			return
+		end
+		local move = direction.Unit * math.clamp(speed * dt, 0, dist)
+		hrp.CFrame = hrp.CFrame + move
+	end)
+end
+
+local function goToFruit(fruit)
+	if not fruit or not fruit:FindFirstChild("Handle") then return end
+	local target = fruit.Handle.Position + Vector3.new(0,3,0)
+	flyTo(target, 75) -- speed in studs/sec
+end
+
+---------------------------------------------------
+-- AUTOSTORE
+---------------------------------------------------
+local stored = {}
 local function autoStore()
-	if not savedSettings.AutoStore then return end
-	for _, tool in ipairs(player.Backpack:GetChildren()) do
-		if tool:IsA("Tool") and tool.Name:find("Fruit") and not storedFruits[tool] then
+	if not settings.AutoStore then return end
+
+	local function store(tool)
+		if stored[tool] then return end
+		if tool:IsA("Tool") and tool.Name:find("Fruit") then
+			local name = tool:GetAttribute("OriginalName") or tool.Name
 			pcall(function()
-				ReplicatedStorage.Remotes.CommF_:InvokeServer("StoreFruit", tool.Name, tool)
+				ReplicatedStorage.Remotes.CommF_:InvokeServer("StoreFruit", name, tool)
 			end)
-			storedFruits[tool] = true
+			stored[tool] = true
 		end
 	end
+
+	local bp = player:FindFirstChild("Backpack")
+	if bp then for _, t in ipairs(bp:GetChildren()) do store(t) end end
+	for _, t in ipairs(character:GetChildren()) do store(t) end
 end
 
---// UI
-local gui = Instance.new("ScreenGui", player.PlayerGui)
+---------------------------------------------------
+-- UI
+---------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = "FruitUI"
 gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
 
-local main = Instance.new("Frame", gui)
-main.AnchorPoint = Vector2.new(0.5,0.5)
-main.Position = UDim2.fromScale(0.5,0.5)
-main.Size = UserInputService.TouchEnabled and UDim2.fromOffset(520,600) or UDim2.fromOffset(450,520)
-main.BackgroundColor3 = Color3.fromRGB(25,25,25)
-main.BorderSizePixel = 0
-Instance.new("UICorner", main).CornerRadius = UDim.new(0,16)
+-- ICON BUTTON (DRAGGABLE & CLICK TO MINIMIZE)
+local icon = Instance.new("TextButton", gui)
+icon.Size = UDim2.new(0,50,0,50)
+icon.Position = UDim2.new(0.05,0,0.5,0)
+icon.Text = "🍎"
+icon.TextScaled = true
+icon.Font = Enum.Font.GothamBold
+icon.BackgroundColor3 = Color3.fromRGB(70,180,255)
+icon.AutoButtonColor = false
+icon.ZIndex = 10
+icon.Active = true
+icon.Draggable = true
+Instance.new("UICorner", icon).CornerRadius = UDim.new(1,0)
 
---// Title bar
-local title = Instance.new("Frame", main)
-title.Size = UDim2.new(1,0,0,45)
+-- MAIN MENU
+local menu = Instance.new("Frame", gui)
+menu.Size = UDim2.new(0,450,0,500)
+menu.Position = UDim2.new(0.5,0,0.5,0)
+menu.AnchorPoint = Vector2.new(0.5,0.5)
+menu.BackgroundColor3 = Color3.fromRGB(25,25,25)
+menu.Visible = false
+Instance.new("UICorner", menu).CornerRadius = UDim.new(0,15)
+
+-- TITLE BAR
+local title = Instance.new("TextLabel", menu)
+title.Size = UDim2.new(1,0,0,40)
 title.BackgroundColor3 = Color3.fromRGB(40,40,40)
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+title.Text = "Fruit Menu"
 
-local titleText = Instance.new("TextLabel", title)
-titleText.Size = UDim2.new(1,-150,1,0)
-titleText.Position = UDim2.fromOffset(10,0)
-titleText.BackgroundTransparency = 1
-titleText.Text = "Fruit Teleport (Mobile)"
-titleText.Font = Enum.Font.GothamBold
-titleText.TextScaled = true
-titleText.TextColor3 = Color3.new(1,1,1)
-titleText.TextXAlignment = Left
+-- TABS
+local tabs = Instance.new("Frame", menu)
+tabs.Size = UDim2.new(1,0,0,40)
+tabs.Position = UDim2.new(0,0,0,40)
+tabs.BackgroundTransparency = 1
 
---// Buttons
-local function topButton(text,x)
-	local b = Instance.new("TextButton", title)
-	b.Size = UDim2.fromOffset(70,30)
-	b.Position = UDim2.new(1,x,0,7)
-	b.Text = text
+local fruitsTabBtn = Instance.new("TextButton", tabs)
+fruitsTabBtn.Size = UDim2.new(0.5,0,1,0)
+fruitsTabBtn.Position = UDim2.new(0,0,0,0)
+fruitsTabBtn.Text = "Fruits"
+fruitsTabBtn.Font = Enum.Font.GothamBold
+fruitsTabBtn.TextScaled = true
+fruitsTabBtn.BackgroundColor3 = Color3.fromRGB(60,170,255)
+fruitsTabBtn.TextColor3 = Color3.new(1,1,1)
+
+local settingsTabBtn = Instance.new("TextButton", tabs)
+settingsTabBtn.Size = UDim2.new(0.5,0,1,0)
+settingsTabBtn.Position = UDim2.new(0.5,0,0,0)
+settingsTabBtn.Text = "Settings"
+settingsTabBtn.Font = Enum.Font.GothamBold
+settingsTabBtn.TextScaled = true
+settingsTabBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+settingsTabBtn.TextColor3 = Color3.new(1,1,1)
+
+-- FRUITS FRAME
+local fruitsFrame = Instance.new("ScrollingFrame", menu)
+fruitsFrame.Position = UDim2.new(0,10,0,90)
+fruitsFrame.Size = UDim2.new(1,-20,1,-100)
+fruitsFrame.BackgroundTransparency = 1
+fruitsFrame.ScrollBarThickness = 6
+local fruitLayout = Instance.new("UIListLayout", fruitsFrame)
+fruitLayout.Padding = UDim.new(0,6)
+
+local function refreshFruits()
+	for _, c in ipairs(fruitsFrame:GetChildren()) do
+		if c:IsA("TextButton") then c:Destroy() end
+	end
+	for _, f in ipairs(findFruits()) do
+		local b = Instance.new("TextButton", fruitsFrame)
+		b.Size = UDim2.new(1,0,0,40)
+		b.Text = f.Name == "Fruit " and "Spawned Fruit" or f.Name
+		b.Font = Enum.Font.GothamBold
+		b.TextScaled = true
+		b.BackgroundColor3 = Color3.fromRGB(70,170,255)
+		b.TextColor3 = Color3.new(1,1,1)
+		Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
+		b.MouseButton1Click:Connect(function() goToFruit(f) end)
+	end
+	fruitsFrame.CanvasSize = UDim2.new(0,0,0,fruitLayout.AbsoluteContentSize.Y+10)
+end
+
+-- SETTINGS FRAME
+local settingsFrame = Instance.new("Frame", menu)
+settingsFrame.Position = UDim2.new(0,0,0,90)
+settingsFrame.Size = UDim2.new(1,0,1,-100)
+settingsFrame.BackgroundTransparency = 1
+settingsFrame.Visible = false
+
+local function addToggle(parent,text,posY,default,callback)
+	local b = Instance.new("TextButton", parent)
+	b.Size = UDim2.new(0.45,0,0,35)
+	b.Position = UDim2.new(0.05,0,0,posY)
 	b.Font = Enum.Font.GothamBold
 	b.TextScaled = true
 	b.TextColor3 = Color3.new(1,1,1)
-	Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
-	return b
+	local state = default
+	local function refresh()
+		b.Text = text..": "..(state and "ON" or "OFF")
+		b.BackgroundColor3 = state and Color3.fromRGB(60,180,60) or Color3.fromRGB(180,60,60)
+	end
+	refresh()
+	b.MouseButton1Click:Connect(function()
+		state = not state
+		callback(state)
+		refresh()
+	end)
 end
 
-local noclipBtn = topButton("Noclip:On",-230)
-local storeBtn  = topButton("Store:Off",-150)
-local minBtn    = topButton("–",-75)
+addToggle(settingsFrame,"AutoStore",50,settings.AutoStore,function(v) settings.AutoStore = v end)
+addToggle(settingsFrame,"Noclip",100,settings.Noclip,function(v) settings.Noclip = v end)
 
-noclipBtn.BackgroundColor3 = Color3.fromRGB(60,200,60)
-storeBtn.BackgroundColor3  = Color3.fromRGB(180,60,60)
-minBtn.BackgroundColor3    = Color3.fromRGB(200,60,60)
-
---// Content
-local scroll = Instance.new("ScrollingFrame", main)
-scroll.Position = UDim2.fromOffset(10,50)
-scroll.Size = UDim2.new(1,-20,1,-60)
-scroll.CanvasSize = UDim2.new()
-scroll.ScrollBarThickness = 10
-scroll.BackgroundTransparency = 1
-
-local layout = Instance.new("UIListLayout", scroll)
-layout.Padding = UDim.new(0,10)
-
---// Drag (MOBILE + PC)
-local dragging, dragStart, startPos
-title.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-	or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = main.Position
-	end
+-- TAB SWITCHING
+fruitsTabBtn.MouseButton1Click:Connect(function()
+	fruitsFrame.Visible = true
+	settingsFrame.Visible = false
+	fruitsTabBtn.BackgroundColor3 = Color3.fromRGB(60,170,255)
+	settingsTabBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+end)
+settingsTabBtn.MouseButton1Click:Connect(function()
+	fruitsFrame.Visible = false
+	settingsFrame.Visible = true
+	fruitsTabBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+	settingsTabBtn.BackgroundColor3 = Color3.fromRGB(60,170,255)
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-	or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		main.Position = UDim2.new(
-			startPos.X.Scale,
-			startPos.X.Offset + delta.X,
-			startPos.Y.Scale,
-			startPos.Y.Offset + delta.Y
-		)
-	end
+-- ICON CLICK (MINIMIZE / MAXIMIZE)
+icon.MouseButton1Click:Connect(function()
+	menu.Visible = not menu.Visible
 end)
 
-UserInputService.InputEnded:Connect(function()
-	dragging = false
-end)
-
---// Fruit buttons
-local function refresh()
-	for _, c in ipairs(scroll:GetChildren()) do
-		if c:IsA("TextButton") then c:Destroy() end
-	end
-
-	for _, fruit in ipairs(findFruits()) do
-		local b = Instance.new("TextButton", scroll)
-		b.Size = UDim2.new(1,0,0,45)
-		b.Text = fruit.Name == "Fruit " and "Spawned Fruit" or fruit.Name
-		b.Font = Enum.Font.GothamBold
-		b.TextScaled = true
-		b.TextColor3 = Color3.new(1,1,1)
-		b.BackgroundColor3 = Color3.fromRGB(60,180,255)
-		Instance.new("UICorner", b).CornerRadius = UDim.new(0,10)
-		b.MouseButton1Click:Connect(function()
-			teleportTo(fruit)
-		end)
-	end
-	scroll.CanvasSize = UDim2.new(0,0,0,layout.AbsoluteContentSize.Y + 10)
-end
-
---// Button logic
-noclipBtn.MouseButton1Click:Connect(function()
-	savedSettings.Noclip = not savedSettings.Noclip
-	noclipBtn.Text = "Noclip:" .. (savedSettings.Noclip and "On" or "Off")
-	noclipBtn.BackgroundColor3 = savedSettings.Noclip and Color3.fromRGB(60,200,60) or Color3.fromRGB(200,60,60)
-end)
-
-storeBtn.MouseButton1Click:Connect(function()
-	savedSettings.AutoStore = not savedSettings.AutoStore
-	storeBtn.Text = "Store:" .. (savedSettings.AutoStore and "On" or "Off")
-	storeBtn.BackgroundColor3 = savedSettings.AutoStore and Color3.fromRGB(60,200,60) or Color3.fromRGB(200,60,60)
-end)
-
-local minimized = false
-minBtn.MouseButton1Click:Connect(function()
-	minimized = not minimized
-	scroll.Visible = not minimized
-	main.Size = minimized and UDim2.fromOffset(main.Size.X.Offset,45)
-		or (UserInputService.TouchEnabled and UDim2.fromOffset(520,600) or UDim2.fromOffset(450,520))
-end)
-
---// Loop
+-- MAIN LOOP
 task.spawn(function()
 	while true do
-		refresh()
+		if fruitsFrame.Visible then refreshFruits() end
 		autoStore()
 		task.wait(1)
 	end
